@@ -1,0 +1,41 @@
+{
+  "name": "usagetoken",
+  "version": "0.1.0",
+  "description": "A Node/TypeScript CLI for collecting and reporting local coding-agent token usage",
+  "license": "MIT",
+  "author": "mujiaming",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/mujiaming/usage-token.git"
+  },
+  "keywords": [
+    "token-usage",
+    "cli",
+    "typescript",
+    "ccusage",
+    "coding-agent"
+  ],
+  "bin": {
+    "usagetoken": "./dist/bin/usagetoken.js"
+  },
+  "files": [
+    "dist/bin",
+    "dist/src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/src/core/assets && cp src/core/assets/*.json dist/src/core/assets/",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "start": "node ./dist/bin/usagetoken.js",
+    "diff:ccusage": "npm run build && node ./dist/scripts/diff-ccusage.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
