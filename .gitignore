@@ -1,22 +1,30 @@
-.DS_Store
+# Dependencies
 node_modules/
-dist/
-coverage/
-.nyc_output/
 
+# Build output
+dist/
+
+# WorkBuddy workspace metadata
+.workbuddy/
+
+# Generated report files (temporary)
+*-report.html
+*-preview.html
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 
+# Environment
 .env
-.env.*
-!.env.example
-
-daily.json
-out/
-upload*.json
-*.upload.json
-*.local.json
-
+.env.local

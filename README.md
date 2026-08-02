@@ -1,81 +1,237 @@
+<div align="center">
+
 # usagetoken
 
-A Node/TypeScript CLI for collecting local coding-agent token usage. The runtime
-implementation is independent from `ccusage`, but JSON output is kept compatible
-with `ccusage 20.0.19` for the fields used by team reporting.
+**本地编码 Agent Token 用量统计 CLI 工具**
 
-## Usage
+一个独立的 Node/TypeScript CLI，用于采集本地各类编码 Agent 的 token 用量，提供个人仪表盘、团队上报和 5 小时计费窗口分析。
 
-Build first, then run the compiled CLI:
+JSON 输出与 `ccusage 20.0.19` 保持字段兼容。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node](https://img.shields.io/badge/Node-%3E%3D20-green.svg)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
+
+</div>
+
+---
+
+## 简介
+
+`usagetoken` 扫描本地各类编码 Agent（Claude Code、Codex、Copilot、Gemini、Kimi 等 16+ 种）的会话日志，统一采集 token 用量数据，提供：
+
+- **终端报表** — daily / weekly / monthly / session / blocks 五种维度
+- **HTML 仪表盘** — 带视图切换、日期筛选、KPI 卡片、Token 构成图、智能洞察
+- **独立 HTML 报告** — 任意命令加 `--html` 即可生成可视化页面
+- **团队上报** — 本地仓库 + 团队/组织汇总服务器
+- **5 小时计费窗口** — 追踪 Claude 风格的 block 消耗节奏和燃烧率预测
+
+## 功能特性
+
+- 支持 16+ 种编码 Agent 数据源，自动发现本地日志
+- 个人仪表盘支持 5 个视图 Tab 切换（Daily / Weekly / Monthly / Session / Blocks）
+- 日期范围筛选，所有图表联动更新
+- Token 构成可视化（input / output / cacheRead / cacheCreate 环形图）
+- 带坐标轴和数值标注的柱状图
+- 模型和项目的占比进度条 + 效率对比（$/M tokens）
+- 智能 Insights：成本突增检测、缓存节省、模型性价比、最忙日
+- `--html` 选项：终端命令一键生成独立可视化 HTML 报告
+- ccusage JSON 兼容，可无缝对接现有团队报表管线
+- 纯本地优先，数据存储在 `~/.usagetoken/`
+
+## 快速开始
+
+### 安装
 
 ```bash
+git clone https://gitee.com/mujiaming/usage-token.git
+cd usage-token
+npm install
 npm run build
-node dist/bin/usagetoken.js daily --json --offline
-node dist/bin/usagetoken.js weekly --timezone Asia/Shanghai
-node dist/bin/usagetoken.js monthly --upload-file ./out/monthly.json
-node dist/bin/usagetoken.js session --since 2026-07-01 --until 2026-07-31
-node dist/bin/usagetoken.js blocks --json --offline
 ```
 
-Supported commands:
+### 个人使用
 
-- `daily`
-- `weekly`
-- `monthly`
-- `session`
-- `blocks`
+最简单的方式 —— 一条命令同步数据并打开仪表盘：
 
-Important options:
+```bash
+node dist/bin/usagetoken.js cc --timezone Asia/Shanghai
+```
 
-- `--json`
-- `--since YYYY-MM-DD`
-- `--until YYYY-MM-DD`
-- `--timezone <IANA timezone>`
-- `--mode auto|display|calculate`
-- `--offline`
-- `--no-cost`
-- `--upload-file <path>`
-- `--source <name>`
-- `--by-source`
+全局安装后更方便：
 
-`--upload-file` writes a local envelope whose `payload` is the same
-ccusage-compatible JSON produced by the command.
+```bash
+npm install -g .
+cc
+```
 
-By default, `daily`, `weekly`, and `monthly` merge all sources into ccusage's
-`agent: "all"` rows. Use `--source copilot` to filter to one adapter, or
-`--by-source` to emit one row per source per period.
+`cc` 命令会：同步本地用量 → 渲染 HTML 仪表盘 → 自动在浏览器中打开。
 
-## Data Sources
+仪表盘默认输出到 `~/.usagetoken/dashboard.html`。
 
-The v1 adapters cover the ccusage all-agent sources used by the diff harness:
+### 终端报表
 
-- Claude
-- Codex
-- OpenCode
-- Amp
-- Droid
-- Codebuff
-- Hermes
-- pi
-- Goose
-- OpenClaw
-- Kilo
-- Copilot
-- Gemini
-- Kimi
-- Qwen
-- Antigravity placeholder discovery
+```bash
+# 日报
+node dist/bin/usagetoken.js daily
 
-Copilot defaults to `~/.copilot/session-state/*/events.jsonl`, matching the
-team path convention. The ccusage diff harness disables that source by default
-because ccusage does not currently read Copilot session-state files.
+# 周报（指定时区）
+node dist/bin/usagetoken.js weekly --timezone Asia/Shanghai
 
-`blocks` intentionally follows ccusage's current behavior and reports Claude
-session blocks only.
+# 月报
+node dist/bin/usagetoken.js monthly
 
-## Development
+# 会话维度
+node dist/bin/usagetoken.js session --since 2026-07-01 --until 2026-07-31
 
-This is a standard TypeScript build:
+# 5 小时计费窗口
+node dist/bin/usagetoken.js blocks
+```
+
+### HTML 可视化报告
+
+任意报表命令加 `--html` 即可生成独立 HTML 页面：
+
+```bash
+node dist/bin/usagetoken.js daily --html        # → daily-report.html
+node dist/bin/usagetoken.js weekly --html       # → weekly-report.html
+node dist/bin/usagetoken.js monthly --html      # → monthly-report.html
+node dist/bin/usagetoken.js session --html      # → session-report.html
+node dist/bin/usagetoken.js blocks --html       # → blocks-report.html
+```
+
+HTML 报告包含 KPI 卡片、数据表格、成本进度条，样式与仪表盘统一。
+
+## 命令一览
+
+| 命令 | 说明 |
+|---|---|
+| `cc` | 一键同步 + 打开仪表盘（个人推荐入口） |
+| `sync` | 采集所有数据源的用量，写入本地仓库 |
+| `dashboard` | 渲染 HTML 仪表盘到 `~/.usagetoken/dashboard.html` |
+| `daily` | 按天汇总 token 用量 |
+| `weekly` | 按周汇总 token 用量 |
+| `monthly` | 按月汇总 token 用量 |
+| `session` | 按会话汇总 token 用量 |
+| `blocks` | 5 小时计费窗口分析（Claude 风格） |
+| `upload-daily` | 上传每日汇总到团队服务器 |
+| `serve` | 启动团队/组织汇总服务器 |
+
+### 通用选项
+
+| 选项 | 说明 |
+|---|---|
+| `--json` | 输出 ccusage 兼容的 JSON |
+| `--html` | 生成独立 HTML 可视化报告 |
+| `--since YYYY-MM-DD` | 起始日期 |
+| `--until YYYY-MM-DD` | 截止日期 |
+| `--timezone <IANA>` | 时区（如 `Asia/Shanghai`） |
+| `--mode auto\|display\|calculate` | 成本计算模式 |
+| `--offline` | 离线模式，跳过在线定价更新 |
+| `--no-cost` | 不计算成本 |
+| `--source <name>` | 仅统计指定数据源 |
+| `--by-source` | 按数据源分行输出 |
+| `--html-file <path>` | 自定义 HTML 输出路径 |
+| `--store-dir <path>` | 自定义仓库目录 |
+
+## 仪表盘功能
+
+`cc` / `dashboard` 命令生成的 HTML 仪表盘包含：
+
+### 视图切换
+
+顶部 Tab 栏支持 5 种视图，所有图表联动更新：
+
+| 视图 | 内容 |
+|---|---|
+| **Daily** | 每日 token 趋势柱状图 + 每日明细表 |
+| **Weekly** | 按周聚合的汇总数据 |
+| **Monthly** | 按月聚合的汇总数据 |
+| **Session** | 会话列表（ID / 来源 / token / 花费 / 时长） |
+| **Blocks** | 5 小时计费窗口（起止 / token / 花费 / 燃烧率 / 状态） |
+
+### 日期范围筛选
+
+支持 From / To 日期选择器和 All time 快捷按钮，筛选后 KPI、图表、表格全部联动。
+
+### KPI 卡片
+
+- 总天数 / 总花费 / 总 token / 今日花费
+- 缓存命中率（衡量使用效率）
+- 会话数
+- 环比变化箭头
+
+### 可视化组件
+
+- **Token 构成环形图** — input / output / cacheRead / cacheCreate 占比
+- **带坐标轴柱状图** — Y 轴刻度 + 数值标注
+- **模型/项目进度条** — 占比可视化 + $/M tokens 效率指标
+- **智能 Insights** — 成本突增、缓存节省、模型性价比、最忙日自动检测
+
+## 团队上报流程
+
+### 1. 启动汇总服务器
+
+```bash
+node dist/bin/usagetoken.js serve --host 127.0.0.1 --port 8787 --server-mode team
+```
+
+### 2. 上传每日汇总
+
+```bash
+node dist/bin/usagetoken.js upload-daily --endpoint http://127.0.0.1:8787/usage/daily-batch
+```
+
+上传失败会本地排队，可稍后重试。
+
+### 3. 服务器 API
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/` | GET | 团队仪表盘 HTML |
+| `/api/rollups` | GET | 汇总数据 JSON |
+| `/usage/daily-batch` | POST | 接收每日批量上报 |
+
+### 本地配置
+
+本地仓库和配置存储在 `~/.usagetoken/`：
+
+```
+~/.usagetoken/
+├── config.json          # 用户身份、团队/组织元数据、上传设置
+├── warehouse.json       # 用量仓库（usageRecords / sessionSummaries / dailyUserSummaries）
+└── dashboard.html       # 仪表盘
+```
+
+## 数据源
+
+支持自动发现以下编码 Agent 的本地日志：
+
+| 数据源 | 本地路径 | 解析方式 |
+|---|---|---|
+| Claude | `~/.claude` | 专用解析器 |
+| Codex | `~/.codex` | 专用解析器 |
+| Copilot | `~/.copilot/session-state/*/events.jsonl` | OpenTelemetry |
+| OpenCode | `~/.opencode` | SQLite |
+| Goose | `~/.goose` | SQLite |
+| Hermes | `~/.hermes` | SQLite |
+| Kilo | `~/.kilo` | SQLite |
+| Antigravity | — | SQLite |
+| Amp | `~/.local/share/amp` | JSON |
+| Droid | `~/.factory/sessions` | JSON |
+| Codebuff | `~/.config/manicode*/projects` | JSON |
+| Pi | `~/.pi/agent/sessions` | JSON |
+| OpenClaw | `~/.openclaw` | JSONL |
+| Gemini | `~/.gemini/tmp` | JSON |
+| Kimi | `~/.kimi` | JSONL |
+| Qwen | `~/.qwen` | JSONL |
+
+默认合并所有数据源。使用 `--source <name>` 筛选单个数据源，或 `--by-source` 按数据源分行输出。
+
+## 开发
+
+### 构建
 
 ```bash
 npm install
@@ -83,37 +239,75 @@ npm run build
 npm test
 ```
 
-SQLite-backed adapters use Node's built-in `node:sqlite` when available. If a
-local environment has `better-sqlite3` installed, the runtime can use it
-dynamically, but it is not a package dependency.
+构建脚本跨平台，会将运行时定价资产复制到 `dist/`。
 
-Run live compatibility checks against a local or globally installed ccusage:
+### 技术栈
+
+- TypeScript 5.8 + Node.js ≥ 20
+- 零运行时依赖
+- SQLite 适配器使用 Node 内置的 `node:sqlite`（可选支持 `better-sqlite3`）
+- 测试使用 Node 内置 `node --test`
+
+### ccusage 兼容性验证
 
 ```bash
 npm run diff:ccusage -- daily weekly monthly session
 CCUSAGE_ROOT=/path/to/ccusage npm run diff:ccusage -- blocks
 ```
 
-The diff script builds `usagetoken`, runs both CLIs with matching JSON options,
-normalizes ordering and floating point noise, then reports field-level
-differences.
+diff 脚本会构建 `usagetoken`，用匹配的 JSON 选项运行两个 CLI，规范化排序和浮点噪声后报告字段级差异。
 
-## Packaging
+## 项目结构
 
-The package whitelist only includes compiled runtime files:
+```
+usage-token/
+├── bin/
+│   ├── usagetoken.ts      # CLI 入口
+│   └── cc.ts              # cc 快捷命令入口
+├── src/
+│   ├── bin/
+│   │   ├── usagetoken.ts  # CLI 主逻辑
+│   │   └── cc.ts          # cc 命令逻辑
+│   ├── cli.ts             # 命令解析与分发
+│   ├── types.ts           # 类型定义
+│   ├── core/
+│   │   ├── summary.ts     # daily/weekly/monthly/session 汇总
+│   │   ├── blocks.ts      # 5 小时计费窗口
+│   │   ├── pricing.ts     # 模型定价
+│   │   └── date.ts        # 日期工具
+│   ├── sources/           # 数据源适配器（16+ 种）
+│   ├── output/
+│   │   ├── table.ts       # 终端表格渲染
+│   │   └── html-report.ts # HTML 报告渲染
+│   ├── product/
+│   │   ├── dashboard.ts   # 仪表盘渲染（个人 + 团队）
+│   │   ├── store.ts       # 本地仓库读写
+│   │   ├── warehouse.ts   # 仓库数据结构
+│   │   ├── config.ts      # 产品配置
+│   │   └── server.ts      # 团队服务器
+│   ├── compat/
+│   │   └── ccusage.ts     # ccusage 兼容层
+│   └── upload.ts          # 上传逻辑
+├── test/                  # 测试
+├── scripts/
+│   ├── build.mjs          # 构建脚本
+│   └── diff-ccusage.ts    # 兼容性 diff
+└── tsconfig.json
+```
+
+## 打包
+
+npm 包白名单仅包含编译后的运行时文件：
 
 - `dist/bin`
 - `dist/src`
 - `README.md`
 - `LICENSE`
 
-Development-only files such as `src/`, `test/`, `scripts/`, and `dist/test/`
-are excluded from the packed CLI.
+`src/`、`test/`、`scripts/`、`dist/test/` 等开发文件不会打包进 CLI。
 
-## License and Attribution
+## 许可证
 
-This project is released under the MIT License.
+[MIT License](LICENSE) © 2026 mujiaming
 
-`usagetoken` uses `ccusage` as a compatibility oracle for JSON shape, aggregation
-behavior, and pricing snapshots. `ccusage` is also MIT licensed; see the upstream
-project for its original implementation and license notice.
+本项目使用 `ccusage` 作为 JSON 格式、聚合行为和定价快照的兼容性参照。`ccusage` 同样采用 MIT 许可证。

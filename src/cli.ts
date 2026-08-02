@@ -1,11 +1,20 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { blocksToCcusageJson, reportToCcusageJson } from "./compat/ccusage.js";
-import { normalizeDateBound } from "./core/date.js";
 import { summarizeBlocks } from "./core/blocks.js";
+import { normalizeDateBound } from "./core/date.js";
 import { summarizeAllAgent, summarizeBySource } from "./core/summary.js";
 import { renderBlocksTable, renderTable } from "./output/table.js";
+import { renderReportHtml, writeReportHtml } from "./output/html-report.js";
+import { readProductConfig } from "./product/config.js";
+import { writeDashboardFile } from "./product/dashboard.js";
+import { openInBrowser } from "./product/open.js";
+import { startUsageServer } from "./product/server.js";
+import { readPendingUploads, readWarehouse, writePendingUploads, writeWarehouse } from "./product/store.js";
+import { postDailyBatch } from "./product/upload.js";
+import { createDailyUserSummaries, createSessionSummaries, createUploadBatch } from "./product/warehouse.js";
 import { sources } from "./sources/index.js";
-import type { CliOptions, CostMode, ReportKind, UsageRecord } from "./types.js";
+import type { CliCommand, CliOptions, CostMode, ProductCommand, ReportKind, UsageRecord } from "./types.js";
 import { writeUploadFile } from "./upload.js";
 
 export async function run(argv: string[], io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process): Promise<number> {
@@ -16,6 +25,10 @@ export async function run(argv: string[], io: { stdout: NodeJS.WritableStream; s
     io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     io.stderr.write("Run 'usagetoken --help' for usage.\n");
     return 2;
+  }
+
+  if (isProductCommand(options.command)) {
+    return await runProductCommand(options, io);
   }
 
   const records = filterRecordsBySource(await loadAllRecords(options), options.source);
@@ -32,6 +45,9 @@ export async function run(argv: string[], io: { stdout: NodeJS.WritableStream; s
     }
     if (options.json) {
       io.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    } else if (options.html) {
+      const path = await writeReportHtml(options.command, options.htmlFile, blocks);
+      io.stdout.write(`${path}\n`);
     } else {
       io.stdout.write(`${renderBlocksTable(blocks)}\n`);
     }
@@ -51,6 +67,9 @@ export async function run(argv: string[], io: { stdout: NodeJS.WritableStream; s
   }
   if (options.json) {
     io.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  } else if (options.html) {
+    const path = await writeReportHtml(options.command, options.htmlFile, rows);
+    io.stdout.write(`${path}\n`);
   } else {
     io.stdout.write(`${renderTable(options.command, rows)}\n`);
   }
@@ -63,10 +82,10 @@ export function parseArgs(argv: string[]): CliOptions {
     printHelpAndExit();
   }
   if (args.includes("--version") || args.includes("-v") || args.includes("-V")) {
-    process.stdout.write("usagetoken 0.1.0\n");
+    process.stdout.write("usagetoken 0.2.0\n");
     process.exit(0);
   }
-  let command: ReportKind = "daily";
+  let command: CliCommand = "daily";
   if (args[0] && !args[0].startsWith("-")) {
     command = parseCommand(args.shift() ?? "daily");
   }
@@ -75,7 +94,10 @@ export function parseArgs(argv: string[]): CliOptions {
     json: false,
     mode: "auto",
     offline: true,
-    noCost: false
+    noCost: false,
+    host: "127.0.0.1",
+    port: 8787,
+    serverMode: "team"
   };
   while (args.length > 0) {
     const arg = args.shift() ?? "";
@@ -118,6 +140,27 @@ export function parseArgs(argv: string[]): CliOptions {
       case "--by-source":
         options.bySource = true;
         break;
+      case "--html":
+        options.html = true;
+        break;
+      case "--html-file":
+        options.htmlFile = requireValue(arg, args.shift());
+        break;
+      case "--store-dir":
+        options.storeDir = requireValue(arg, args.shift());
+        break;
+      case "--port":
+        options.port = Number.parseInt(requireValue(arg, args.shift()), 10);
+        break;
+      case "--host":
+        options.host = requireValue(arg, args.shift());
+        break;
+      case "--server-mode":
+        options.serverMode = parseServerMode(requireValue(arg, args.shift()));
+        break;
+      case "--endpoint":
+        options.endpoint = requireValue(arg, args.shift());
+        break;
       default:
         if (arg.startsWith("--since=")) options.since = normalizeDateBound(arg.slice("--since=".length));
         else if (arg.startsWith("--until=")) options.until = normalizeDateBound(arg.slice("--until=".length));
@@ -125,8 +168,17 @@ export function parseArgs(argv: string[]): CliOptions {
         else if (arg.startsWith("--mode=")) options.mode = parseMode(arg.slice("--mode=".length));
         else if (arg.startsWith("--upload-file=")) options.uploadFile = arg.slice("--upload-file=".length);
         else if (arg.startsWith("--source=")) options.source = arg.slice("--source=".length);
+        else if (arg.startsWith("--html-file=")) options.htmlFile = arg.slice("--html-file=".length);
+        else if (arg.startsWith("--store-dir=")) options.storeDir = arg.slice("--store-dir=".length);
+        else if (arg.startsWith("--port=")) options.port = Number.parseInt(arg.slice("--port=".length), 10);
+        else if (arg.startsWith("--host=")) options.host = arg.slice("--host=".length);
+        else if (arg.startsWith("--server-mode=")) options.serverMode = parseServerMode(arg.slice("--server-mode=".length));
+        else if (arg.startsWith("--endpoint=")) options.endpoint = arg.slice("--endpoint=".length);
         else throw new Error(`Unknown option '${arg}'`);
     }
+  }
+  if (options.port != null && (!Number.isFinite(options.port) || options.port <= 0)) {
+    throw new Error("Invalid --port");
   }
   return options;
 }
@@ -134,6 +186,86 @@ export function parseArgs(argv: string[]): CliOptions {
 function filterRecordsBySource(records: UsageRecord[], source: string | undefined): UsageRecord[] {
   if (!source) return records;
   return records.filter((record) => record.source === source);
+}
+
+async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream }): Promise<number> {
+  const storeDir = resolveStoreDir(options.storeDir);
+  const config = await readProductConfig(storeDir);
+  if (options.command === "sync") {
+    const records = filterRecordsBySource(await loadAllRecords(options), options.source);
+    const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
+    const dailyUserSummaries = createDailyUserSummaries(records, config, options.timezone, options.mode);
+    const warehouse = await writeWarehouse(storeDir, config, { usageRecords: records, sessionSummaries, dailyUserSummaries });
+    io.stdout.write(`Synced ${warehouse.usageRecords.length} usage records into ${storeDir}\n`);
+    return 0;
+  }
+  if (options.command === "dashboard") {
+    const warehouse = await ensureWarehouse(storeDir, options);
+    const path = await writeDashboardFile(storeDir, warehouse, options.htmlFile);
+    io.stdout.write(`${path}\n`);
+    return 0;
+  }
+  if (options.command === "cc") {
+    const records = filterRecordsBySource(await loadAllRecords(options), options.source);
+    const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
+    const dailyUserSummaries = createDailyUserSummaries(records, config, options.timezone, options.mode);
+    const warehouse = await writeWarehouse(storeDir, config, { usageRecords: records, sessionSummaries, dailyUserSummaries });
+    const path = await writeDashboardFile(storeDir, warehouse, options.htmlFile);
+    await openInBrowser(path);
+    io.stdout.write(`Opened ${path}\n`);
+    return 0;
+  }
+  if (options.command === "upload-daily") {
+    const warehouse = await ensureWarehouse(storeDir, options);
+    const endpoint = options.endpoint ?? config.upload.endpoint;
+    if (!endpoint) {
+      io.stderr.write("No upload endpoint configured. Set --endpoint or store config upload.endpoint.\n");
+      return 2;
+    }
+    if (warehouse.dailyUserSummaries.length === 0) {
+      io.stdout.write("No daily summaries to upload.\n");
+      return 0;
+    }
+    const batch = createUploadBatch(config, warehouse.dailyUserSummaries);
+    try {
+      const result = await postDailyBatch(endpoint, batch);
+      if (!result.duplicate) {
+        await writePendingUploads(storeDir, []);
+      }
+      io.stdout.write(`${result.duplicate ? "Duplicate" : "Uploaded"} daily batch ${batch.batchId}\n`);
+      return 0;
+    } catch (error) {
+      const pending = await readPendingUploads(storeDir);
+      pending.push(batch);
+      await writePendingUploads(storeDir, pending);
+      io.stderr.write(`Upload failed, batch queued locally: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+  if (options.command === "serve") {
+    await startUsageServer({
+      storeDir,
+      host: options.host ?? "127.0.0.1",
+      port: options.port ?? 8787,
+      mode: options.serverMode ?? "team",
+      io
+    });
+    return await new Promise<number>(() => {});
+  }
+  io.stderr.write(`Unsupported command '${options.command}'\n`);
+  return 2;
+}
+
+async function ensureWarehouse(storeDir: string, options: CliOptions) {
+  const config = await readProductConfig(storeDir);
+  const existing = await readWarehouse(storeDir, config);
+  if (existing.usageRecords.length > 0 || existing.dailyUserSummaries.length > 0) {
+    return existing;
+  }
+  const records = filterRecordsBySource(await loadAllRecords(options), options.source);
+  const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
+  const dailyUserSummaries = createDailyUserSummaries(records, config, options.timezone, options.mode);
+  return await writeWarehouse(storeDir, config, { usageRecords: records, sessionSummaries, dailyUserSummaries });
 }
 
 async function loadAllRecords(options: CliOptions): Promise<UsageRecord[]> {
@@ -154,9 +286,9 @@ async function loadAllRecords(options: CliOptions): Promise<UsageRecord[]> {
   return all;
 }
 
-function parseCommand(value: string): ReportKind {
-  if (["daily", "weekly", "monthly", "session", "blocks"].includes(value)) {
-    return value as ReportKind;
+function parseCommand(value: string): CliCommand {
+  if (["daily", "weekly", "monthly", "session", "blocks", "sync", "dashboard", "upload-daily", "serve", "cc"].includes(value)) {
+    return value as CliCommand;
   }
   throw new Error(`Unknown command '${value}'`);
 }
@@ -168,6 +300,13 @@ function parseMode(value: string): CostMode {
   throw new Error(`Invalid --mode '${value}'`);
 }
 
+function parseServerMode(value: string): "local" | "team" | "org" {
+  if (["local", "team", "org"].includes(value)) {
+    return value as "local" | "team" | "org";
+  }
+  throw new Error(`Invalid --server-mode '${value}'`);
+}
+
 function requireValue(flag: string, value: string | undefined): string {
   if (!value) {
     throw new Error(`${flag} requires a value`);
@@ -175,11 +314,20 @@ function requireValue(flag: string, value: string | undefined): string {
   return value;
 }
 
-function printHelpAndExit(): never {
-  process.stdout.write(`Usage: usagetoken [daily|weekly|monthly|session|blocks] [options]
+function resolveStoreDir(storeDir: string | undefined): string {
+  return storeDir ?? join(homedir(), ".usagetoken");
+}
 
-Options:
+function isProductCommand(value: CliCommand): value is ProductCommand {
+  return ["sync", "dashboard", "upload-daily", "serve", "cc"].includes(value);
+}
+
+function printHelpAndExit(): never {
+  process.stdout.write(`Usage: usagetoken [daily|weekly|monthly|session|blocks|sync|dashboard|upload-daily|serve|cc] [options]
+
+Classic report options:
   --json                  Print ccusage-compatible JSON
+  --html                  Generate an HTML report file
   -s, --since <date>      Include records on or after YYYY-MM-DD
   -u, --until <date>      Include records on or before YYYY-MM-DD
   -z, --timezone <tz>     Date grouping timezone
@@ -189,6 +337,17 @@ Options:
   --upload-file <path>    Write local upload envelope
   --source <name>         Include only one source, e.g. copilot
   --by-source             Split daily/weekly/monthly rows by source
+
+Product options:
+  --store-dir <path>      Local warehouse directory, default ~/.usagetoken
+  --html-file <path>      Dashboard output HTML file
+  --endpoint <url>        Upload endpoint for upload-daily
+  --host <host>           Host for serve, default 127.0.0.1
+  --port <port>           Port for serve, default 8787
+  --server-mode <mode>    local, team, or org
+  cc                      Sync, render dashboard, and open it in your browser
+
+Other:
   -h, --help              Show help
   -v, --version           Show version
 `);
