@@ -28,3 +28,6 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+
+# npm auth (contains tokens)
+.npmrc

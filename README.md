@@ -9,6 +9,7 @@
 JSON 输出与 `ccusage 20.0.19` 保持字段兼容。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/usagetoken.svg)](https://www.npmjs.com/package/usagetoken)
 [![Node](https://img.shields.io/badge/Node-%3E%3D20-green.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
@@ -44,11 +45,22 @@ JSON 输出与 `ccusage 20.0.19` 保持字段兼容。
 
 ### 安装
 
+**方式一：npm 全局安装（推荐）**
+
+```bash
+npm install -g usagetoken
+cc
+```
+
+**方式二：从源码构建**
+
 ```bash
 git clone https://gitee.com/mujiaming/usage-token.git
 cd usage-token
 npm install
 npm run build
+npm install -g .
+cc
 ```
 
 ### 个人使用
@@ -56,15 +68,10 @@ npm run build
 最简单的方式 —— 一条命令同步数据并打开仪表盘：
 
 ```bash
-node dist/bin/usagetoken.js cc --timezone Asia/Shanghai
-```
-
-全局安装后更方便：
-
-```bash
-npm install -g .
 cc
 ```
+
+> 如果通过源码构建且未全局安装，请使用 `node dist/bin/usagetoken.js cc`。
 
 `cc` 命令会：同步本地用量 → 渲染 HTML 仪表盘 → 自动在浏览器中打开。
 
@@ -74,31 +81,33 @@ cc
 
 ```bash
 # 日报
-node dist/bin/usagetoken.js daily
+usagetoken daily
 
 # 周报（指定时区）
-node dist/bin/usagetoken.js weekly --timezone Asia/Shanghai
+usagetoken weekly --timezone Asia/Shanghai
 
 # 月报
-node dist/bin/usagetoken.js monthly
+usagetoken monthly
 
 # 会话维度
-node dist/bin/usagetoken.js session --since 2026-07-01 --until 2026-07-31
+usagetoken session --since 2026-07-01 --until 2026-07-31
 
 # 5 小时计费窗口
-node dist/bin/usagetoken.js blocks
+usagetoken blocks
 ```
+
+> 未全局安装时，将 `usagetoken` 替换为 `node dist/bin/usagetoken.js`。
 
 ### HTML 可视化报告
 
 任意报表命令加 `--html` 即可生成独立 HTML 页面：
 
 ```bash
-node dist/bin/usagetoken.js daily --html        # → daily-report.html
-node dist/bin/usagetoken.js weekly --html       # → weekly-report.html
-node dist/bin/usagetoken.js monthly --html      # → monthly-report.html
-node dist/bin/usagetoken.js session --html      # → session-report.html
-node dist/bin/usagetoken.js blocks --html       # → blocks-report.html
+usagetoken daily --html        # → daily-report.html
+usagetoken weekly --html       # → weekly-report.html
+usagetoken monthly --html      # → monthly-report.html
+usagetoken session --html      # → session-report.html
+usagetoken blocks --html       # → blocks-report.html
 ```
 
 HTML 报告包含 KPI 卡片、数据表格、成本进度条，样式与仪表盘统一。
@@ -174,13 +183,13 @@ HTML 报告包含 KPI 卡片、数据表格、成本进度条，样式与仪表�
 ### 1. 启动汇总服务器
 
 ```bash
-node dist/bin/usagetoken.js serve --host 127.0.0.1 --port 8787 --server-mode team
+usagetoken serve --host 127.0.0.1 --port 8787 --server-mode team
 ```
 
 ### 2. 上传每日汇总
 
 ```bash
-node dist/bin/usagetoken.js upload-daily --endpoint http://127.0.0.1:8787/usage/daily-batch
+usagetoken upload-daily --endpoint http://127.0.0.1:8787/usage/daily-batch
 ```
 
 上传失败会本地排队，可稍后重试。
