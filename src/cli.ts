@@ -82,7 +82,7 @@ export function parseArgs(argv: string[]): CliOptions {
     printHelpAndExit();
   }
   if (args.includes("--version") || args.includes("-v") || args.includes("-V")) {
-    process.stdout.write("usagetoken 0.1.1\n");
+    process.stdout.write("usagetoken 0.1.2\n");
     process.exit(0);
   }
   let command: CliCommand = "daily";

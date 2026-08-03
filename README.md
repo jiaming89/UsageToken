@@ -49,7 +49,7 @@ JSON 输出与 `ccusage 20.0.19` 保持字段兼容。
 
 ```bash
 npm install -g usagetoken
-cc
+utoken
 ```
 
 **方式二：从源码构建**
@@ -60,7 +60,7 @@ cd usage-token
 npm install
 npm run build
 npm install -g .
-cc
+utoken
 ```
 
 ### 个人使用
@@ -68,12 +68,12 @@ cc
 最简单的方式 —— 一条命令同步数据并打开仪表盘：
 
 ```bash
-cc
+utoken
 ```
 
-> 如果通过源码构建且未全局安装，请使用 `node dist/bin/usagetoken.js cc`。
+> 如果通过源码构建且未全局安装，请使用 `node dist/bin/utoken.js`。
 
-`cc` 命令会：同步本地用量 → 渲染 HTML 仪表盘 → 自动在浏览器中打开。
+`utoken` 命令会：同步本地用量 → 渲染 HTML 仪表盘 → 自动在浏览器中打开。
 
 仪表盘默认输出到 `~/.usagetoken/dashboard.html`。
 
@@ -116,7 +116,7 @@ HTML 报告包含 KPI 卡片、数据表格、成本进度条，样式与仪表�
 
 | 命令 | 说明 |
 |---|---|
-| `cc` | 一键同步 + 打开仪表盘（个人推荐入口） |
+| `utoken` | 一键同步 + 打开仪表盘（个人推荐入口） |
 | `sync` | 采集所有数据源的用量，写入本地仓库 |
 | `dashboard` | 渲染 HTML 仪表盘到 `~/.usagetoken/dashboard.html` |
 | `daily` | 按天汇总 token 用量 |
@@ -146,7 +146,7 @@ HTML 报告包含 KPI 卡片、数据表格、成本进度条，样式与仪表�
 
 ## 仪表盘功能
 
-`cc` / `dashboard` 命令生成的 HTML 仪表盘包含：
+`utoken` / `dashboard` 命令生成的 HTML 仪表盘包含：
 
 ### 视图切换
 
@@ -272,7 +272,7 @@ diff 脚本会构建 `usagetoken`，用匹配的 JSON 选项运行两个 CLI，�
 usage-token/
 ├── bin/
 │   ├── usagetoken.ts      # CLI 入口
-│   └── cc.ts              # cc 快捷命令入口
+│   └── utoken.ts          # utoken 快捷命令入口
 ├── src/
 │   ├── bin/
 │   │   ├── usagetoken.ts  # CLI 主逻辑
