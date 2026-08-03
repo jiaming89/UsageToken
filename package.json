@@ -1,6 +1,6 @@
 {
   "name": "usagetoken",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Node/TypeScript CLI for collecting and reporting local coding-agent token usage",
   "license": "MIT",
   "author": "mujiaming",
@@ -17,8 +17,8 @@
     "coding-agent"
   ],
   "bin": {
-    "usagetoken": "./dist/bin/usagetoken.js",
-    "cc": "./dist/bin/cc.js"
+    "usagetoken": "dist/bin/usagetoken.js",
+    "cc": "dist/bin/cc.js"
   },
   "files": [
     "dist/bin",
@@ -28,6 +28,7 @@
   ],
   "scripts": {
     "build": "node ./scripts/build.mjs",
+    "prepack": "npm run build",
     "test": "npm run build && node --test dist/test/*.test.js",
     "start": "node ./dist/bin/usagetoken.js",
     "diff:ccusage": "npm run build && node ./dist/scripts/diff-ccusage.js"
