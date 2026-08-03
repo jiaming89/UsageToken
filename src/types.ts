@@ -1,5 +1,5 @@
 export type ReportKind = "daily" | "weekly" | "monthly" | "session" | "blocks";
-export type ProductCommand = "sync" | "dashboard" | "upload-daily" | "serve" | "cc";
+export type ProductCommand = "sync" | "dashboard" | "upload-daily" | "serve" | "cc" | "utoken";
 export type CliCommand = ReportKind | ProductCommand;
 
 export type CostMode = "auto" | "display" | "calculate";

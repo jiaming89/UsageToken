@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { run } from "../src/cli.js";
 import { startUsageServer } from "../src/product/server.js";
+import { startLocalDashboardServer } from "../src/product/server.js";
+import type { LocalWarehouse } from "../src/types.js";
 
 test("sync writes warehouse and dashboard renders html", async () => {
   const root = await mkdtemp(join(tmpdir(), "usagetoken-product-"));
@@ -108,6 +110,29 @@ test("cc syncs and renders dashboard in one command", async () => {
     else process.env.CODEX_HOME = previousCodexHome;
     if (previousNoOpen == null) delete process.env.USAGETOKEN_NO_OPEN;
     else process.env.USAGETOKEN_NO_OPEN = previousNoOpen;
+  }
+});
+
+test("local dashboard server exposes cached dashboard data", async () => {
+  const warehouse: LocalWarehouse = {
+    schemaVersion: 1,
+    generatedAt: "2026-08-03T00:00:00.000Z",
+    config: { identity: { userId: "local", displayName: "Local", role: "individual" }, upload: { enabled: false, schedule: "daily" } },
+    usageRecords: [],
+    sessionSummaries: [],
+    dailyUserSummaries: []
+  };
+  const dashboard = await startLocalDashboardServer({
+    host: "127.0.0.1",
+    getWarehouse: () => warehouse,
+    getStatus: () => ({ refreshing: true })
+  });
+  try {
+    const response = await fetch(`${dashboard.url}/api/dashboard/status`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { generatedAt: warehouse.generatedAt, refreshing: true });
+  } finally {
+    await new Promise<void>((resolve) => dashboard.server.close(() => resolve()));
   }
 });
 

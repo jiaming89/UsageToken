@@ -5,7 +5,7 @@ export async function openInBrowser(targetPath: string): Promise<void> {
   if (process.env.USAGETOKEN_NO_OPEN === "1") {
     return;
   }
-  const target = pathToFileURL(targetPath).href;
+  const target = /^https?:\/\//u.test(targetPath) ? targetPath : pathToFileURL(targetPath).href;
   const child = process.platform === "win32"
     ? spawn("cmd", ["/c", "start", "", target], { detached: true, stdio: "ignore" })
     : process.platform === "darwin"

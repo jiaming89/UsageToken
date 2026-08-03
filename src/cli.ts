@@ -1,20 +1,21 @@
 import { homedir } from "node:os";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { blocksToCcusageJson, reportToCcusageJson } from "./compat/ccusage.js";
 import { summarizeBlocks } from "./core/blocks.js";
-import { normalizeDateBound } from "./core/date.js";
+import { normalizeDateBound, withinDateRange } from "./core/date.js";
 import { summarizeAllAgent, summarizeBySource } from "./core/summary.js";
 import { renderBlocksTable, renderTable } from "./output/table.js";
 import { renderReportHtml, writeReportHtml } from "./output/html-report.js";
 import { readProductConfig } from "./product/config.js";
 import { writeDashboardFile } from "./product/dashboard.js";
 import { openInBrowser } from "./product/open.js";
-import { startUsageServer } from "./product/server.js";
-import { readPendingUploads, readWarehouse, writePendingUploads, writeWarehouse } from "./product/store.js";
+import { startLocalDashboardServer, startUsageServer } from "./product/server.js";
+import { readPendingUploads, readWarehouse, writePendingUploads, writeWarehouse, readSourceCache, writeSourceCache } from "./product/store.js";
 import { postDailyBatch } from "./product/upload.js";
 import { createDailyUserSummaries, createSessionSummaries, createUploadBatch } from "./product/warehouse.js";
 import { sources } from "./sources/index.js";
-import type { CliCommand, CliOptions, CostMode, ProductCommand, ReportKind, UsageRecord } from "./types.js";
+import type { CliCommand, CliOptions, CostMode, LocalWarehouse, ProductCommand, ReportKind, UsageRecord } from "./types.js";
 import { writeUploadFile } from "./upload.js";
 
 export async function run(argv: string[], io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process): Promise<number> {
@@ -82,7 +83,7 @@ export function parseArgs(argv: string[]): CliOptions {
     printHelpAndExit();
   }
   if (args.includes("--version") || args.includes("-v") || args.includes("-V")) {
-    process.stdout.write("usagetoken 0.1.2\n");
+    process.stdout.write("usagetoken 0.1.7\n");
     process.exit(0);
   }
   let command: CliCommand = "daily";
@@ -215,6 +216,49 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
     io.stdout.write(`Opened ${path}\n`);
     return 0;
   }
+  if (options.command === "utoken") {
+    let warehouse = await readWarehouse(storeDir, config);
+    let refreshing = false;
+    let lastError: string | undefined;
+    let refresh: () => Promise<void>;
+    const dashboard = await startLocalDashboardServer({
+      host: "127.0.0.1",
+      defaultSince: options.since,
+      getWarehouse: () => warehouse,
+      getStatus: () => ({ refreshing, lastError }),
+      refresh: () => refresh()
+    });
+    io.stdout.write(`Dashboard listening on ${dashboard.url}\n`);
+    refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      lastError = undefined;
+      try {
+        io.stdout.write("Refreshing usage cache…\n");
+        const records = await loadCachedRecords(options, storeDir, warehouse, io);
+        const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
+        const dailyUserSummaries = createDailyUserSummaries(records, config, options.timezone, options.mode);
+        warehouse = await writeWarehouse(storeDir, config, { usageRecords: records, sessionSummaries, dailyUserSummaries });
+        io.stdout.write(`Cache refreshed: ${records.length} records. Next refresh in 15 minutes.\n`);
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        io.stderr.write(`Cache refresh failed: ${lastError}\n`);
+      } finally {
+        refreshing = false;
+      }
+    };
+    await openInBrowser(dashboard.url);
+    void refresh();
+    const timer = setInterval(() => void refresh(), 15 * 60 * 1000);
+    return await new Promise<number>((resolve) => {
+      const stop = () => {
+        clearInterval(timer);
+        dashboard.server.close(() => resolve(0));
+      };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    });
+  }
   if (options.command === "upload-daily") {
     const warehouse = await ensureWarehouse(storeDir, options);
     const endpoint = options.endpoint ?? config.upload.endpoint;
@@ -281,13 +325,55 @@ async function loadAllRecords(options: CliOptions): Promise<UsageRecord[]> {
   };
   const all: UsageRecord[] = [];
   for (const source of sources) {
-    all.push(...await source.load(ctx));
+    if (options.source && source.name !== options.source) continue;
+    const records = await source.load(ctx);
+    all.push(...records.filter((record) => withinDateRange(record.timestamp, options.timezone, options.since, options.until)));
   }
   return all;
 }
 
+async function loadCachedRecords(options: CliOptions, storeDir: string, warehouse: LocalWarehouse, io: { stdout: NodeJS.WritableStream }): Promise<UsageRecord[]> {
+  const cache = await readSourceCache(storeDir);
+  const ctx = { env: process.env, cwd: process.cwd(), homeDir: homedir(), mode: options.mode, offline: options.offline };
+  const cachedBySource = new Map<string, UsageRecord[]>();
+  for (const record of warehouse.usageRecords) {
+    const entries = cachedBySource.get(record.source) ?? [];
+    entries.push(record);
+    cachedBySource.set(record.source, entries);
+  }
+  const all: UsageRecord[] = [];
+  const fingerprints: Record<string, string> = {};
+  for (const source of sources) {
+    if (options.source && source.name !== options.source) continue;
+    const detected = await source.detect(ctx);
+    const fingerprint = await fingerprintPaths(detected.paths);
+    fingerprints[source.name] = fingerprint;
+    if (cache.fingerprints[source.name] === fingerprint && cachedBySource.has(source.name)) {
+      io.stdout.write(`Using cached ${source.name} records.\n`);
+      all.push(...(cachedBySource.get(source.name) ?? []));
+    } else {
+      io.stdout.write(`Scanning ${source.name}…\n`);
+      all.push(...await source.load(ctx));
+    }
+  }
+  if (options.source) {
+    for (const [name, records] of cachedBySource) {
+      if (name !== options.source) all.push(...records);
+    }
+  }
+  await writeSourceCache(storeDir, { fingerprints: { ...cache.fingerprints, ...fingerprints } });
+  return all;
+}
+
+async function fingerprintPaths(paths: string[]): Promise<string> {
+  const parts = await Promise.all(paths.sort().map(async (path) => {
+    try { const info = await stat(path); return `${path}:${info.size}:${info.mtimeMs}`; } catch { return `${path}:missing`; }
+  }));
+  return parts.join("|");
+}
+
 function parseCommand(value: string): CliCommand {
-  if (["daily", "weekly", "monthly", "session", "blocks", "sync", "dashboard", "upload-daily", "serve", "cc"].includes(value)) {
+  if (["daily", "weekly", "monthly", "session", "blocks", "sync", "dashboard", "upload-daily", "serve", "cc", "utoken"].includes(value)) {
     return value as CliCommand;
   }
   throw new Error(`Unknown command '${value}'`);
@@ -319,7 +405,7 @@ function resolveStoreDir(storeDir: string | undefined): string {
 }
 
 function isProductCommand(value: CliCommand): value is ProductCommand {
-  return ["sync", "dashboard", "upload-daily", "serve", "cc"].includes(value);
+  return ["sync", "dashboard", "upload-daily", "serve", "cc", "utoken"].includes(value);
 }
 
 function printHelpAndExit(): never {
@@ -345,7 +431,8 @@ Product options:
   --host <host>           Host for serve, default 127.0.0.1
   --port <port>           Port for serve, default 8787
   --server-mode <mode>    local, team, or org
-  cc                      Sync, render dashboard, and open it in your browser
+  utoken                  Start the live local dashboard with background refresh
+  cc                      Legacy one-shot dashboard command
 
 Other:
   -h, --help              Show help

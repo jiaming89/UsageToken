@@ -11,10 +11,26 @@ export function createSessionSummaries(records: UsageRecord[], timezone: string 
 export function createDailyUserSummaries(records: UsageRecord[], config: ProductConfig, timezone: string | undefined, mode: "auto" | "display" | "calculate"): DailyUserSummary[] {
   const dailyRows = summarize(records, "daily", { timezone, mode });
   const dailyBySource = summarizeBySource(records, "daily", { timezone, mode });
+  const projectsByDate = new Map<string, Map<string, { totalTokens: number; totalCost: number; messageCount: number }>>();
+  for (const record of records) {
+    const date = formatDate(record.timestamp, timezone);
+    if (!date) continue;
+    const projects = projectsByDate.get(date) ?? new Map<string, { totalTokens: number; totalCost: number; messageCount: number }>();
+    const projectPath = record.projectPath ?? "Unknown Project";
+    const entry = projects.get(projectPath) ?? { totalTokens: 0, totalCost: 0, messageCount: 0 };
+    entry.totalTokens += record.inputTokens + record.outputTokens + record.cacheCreationTokens + record.cacheReadTokens + (record.extraTotalTokens ?? 0);
+    entry.messageCount += record.messageCount ?? 0;
+    entry.totalCost += calculateRecordCost(record, mode).cost;
+    projects.set(projectPath, entry);
+    projectsByDate.set(date, projects);
+  }
 
   return dailyRows.map((row) => {
     const dateRows = dailyBySource.filter((item) => item.period === row.period);
-    const projectBreakdown = summarizeProjects(records, row.period, timezone, mode);
+    const projectBreakdown = [...(projectsByDate.get(row.period) ?? new Map<string, { totalTokens: number; totalCost: number; messageCount: number }>()).entries()]
+      .map(([projectPath, value]) => ({ projectPath, ...value }))
+      .sort((a, b) => b.totalCost - a.totalCost || b.totalTokens - a.totalTokens)
+      .slice(0, 10);
     return {
       date: row.period,
       identity: config.identity,
@@ -79,28 +95,6 @@ function toSessionSummary(row: UsageSummary): SessionSummaryRecord {
     messageCount: row.messageCount,
     credits: row.credits
   };
-}
-
-function summarizeProjects(
-  records: UsageRecord[],
-  period: string,
-  timezone: string | undefined,
-  mode: "auto" | "display" | "calculate"
-): DailyUserSummary["projectBreakdown"] {
-  const filtered = records.filter((record) => formatDate(record.timestamp, timezone) === period);
-  const map = new Map<string, { totalTokens: number; totalCost: number; messageCount: number }>();
-  for (const record of filtered) {
-    const projectPath = record.projectPath ?? "Unknown Project";
-    const entry = map.get(projectPath) ?? { totalTokens: 0, totalCost: 0, messageCount: 0 };
-    entry.totalTokens += record.inputTokens + record.outputTokens + record.cacheCreationTokens + record.cacheReadTokens + (record.extraTotalTokens ?? 0);
-    entry.messageCount += record.messageCount ?? 0;
-    entry.totalCost += calculateRecordCost(record, mode).cost;
-    map.set(projectPath, entry);
-  }
-  return [...map.entries()]
-    .map(([projectPath, value]) => ({ projectPath, ...value }))
-    .sort((a, b) => b.totalCost - a.totalCost || b.totalTokens - a.totalTokens)
-    .slice(0, 10);
 }
 
 function totalTokens(row: Pick<UsageSummary, "inputTokens" | "outputTokens" | "cacheCreationTokens" | "cacheReadTokens" | "extraTotalTokens">): number {

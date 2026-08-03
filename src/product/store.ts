@@ -2,6 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { DailyUserSummary, LocalWarehouse, ProductConfig, SessionSummaryRecord, UploadBatch, UsageRecord } from "../types.js";
 
+export interface SourceCache {
+  fingerprints: Record<string, string>;
+}
+
 export async function readWarehouse(storeDir: string, config: ProductConfig): Promise<LocalWarehouse> {
   const path = warehousePath(storeDir);
   try {
@@ -53,6 +57,21 @@ export async function writePendingUploads(storeDir: string, batches: UploadBatch
   await writeFile(path, `${JSON.stringify(batches, null, 2)}\n`, "utf8");
 }
 
+export async function readSourceCache(storeDir: string): Promise<SourceCache> {
+  try {
+    const parsed = JSON.parse(await readFile(sourceCachePath(storeDir), "utf8")) as SourceCache;
+    return { fingerprints: parsed.fingerprints ?? {} };
+  } catch {
+    return { fingerprints: {} };
+  }
+}
+
+export async function writeSourceCache(storeDir: string, cache: SourceCache): Promise<void> {
+  const path = sourceCachePath(storeDir);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+}
+
 export async function enqueuePendingUpload(storeDir: string, batch: UploadBatch): Promise<void> {
   const batches = await readPendingUploads(storeDir);
   if (!batches.some((item) => item.batchId === batch.batchId)) {
@@ -67,6 +86,10 @@ export function warehousePath(storeDir: string): string {
 
 function pendingUploadsPath(storeDir: string): string {
   return join(storeDir, "pending-uploads.json");
+}
+
+function sourceCachePath(storeDir: string): string {
+  return join(storeDir, "source-cache.json");
 }
 
 function emptyWarehouse(config: ProductConfig): LocalWarehouse {
