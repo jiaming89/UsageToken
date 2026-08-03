@@ -14,6 +14,8 @@ JSON 输出与 `ccusage 20.0.19` 保持字段兼容。
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
 
+[GitHub 仓库](https://github.com/jiaming89/usage-token) · [Gitee 镜像](https://gitee.com/mujiaming/usage-token)
+
 </div>
 
 ---
@@ -55,13 +57,15 @@ utoken
 **方式二：从源码构建**
 
 ```bash
-git clone https://gitee.com/mujiaming/usage-token.git
+git clone https://github.com/jiaming89/usage-token.git
 cd usage-token
 npm install
 npm run build
 npm install -g .
 utoken
 ```
+
+> 如 GitHub 访问不便，可使用 Gitee 镜像：`git clone https://gitee.com/mujiaming/usage-token.git`。
 
 ### 个人使用
 
