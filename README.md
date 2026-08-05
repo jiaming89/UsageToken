@@ -104,6 +104,16 @@ usagetoken blocks
 
 > 未全局安装时，将 `usagetoken` 替换为 `node dist/bin/usagetoken.js`。
 
+效果示例：
+
+| 每日 | 每周 |
+|---|---|
+| ![每日统计](docs/screenshots/daily.jpg) | ![每周统计](docs/screenshots/weekly.jpg) |
+
+| 每月 | 会话 |
+|---|---|
+| ![每月统计](docs/screenshots/monthly.jpg) | ![会话统计](docs/screenshots/session.jpg) |
+
 ### HTML 可视化报告
 
 任意报表命令加 `--html` 即可生成独立 HTML 页面：
