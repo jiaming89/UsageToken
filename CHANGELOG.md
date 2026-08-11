@@ -1,3 +1,9 @@
+## 0.1.8 - 2026-08-11
+
+### Documentation
+
+- Add GitHub and Gitee project links to the dashboard footer.
+
 ## 0.1.7 - 2026-08-03
 
 ### Fixes
