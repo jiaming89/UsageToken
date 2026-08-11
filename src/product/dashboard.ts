@@ -142,6 +142,8 @@ export function renderDashboardHtml(warehouse: LocalWarehouse): string {
     .insight.info { background: var(--blue-light); color: #1e40af; }
     .empty-text { color: var(--muted); font-size: 13px; }
     .footer { text-align: center; font-size: 12px; color: var(--muted); padding: 16px 0 8px; }
+    .footer a { color: var(--muted); text-decoration: none; }
+    .footer a:hover { color: var(--blue); text-decoration: underline; }
     .session-card { padding:0; overflow:hidden; }.session-header{padding:18px 20px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px}.session-scroll{max-height:520px;overflow:auto;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.session-scroll th{position:sticky;top:0;background:#fbfcff;z-index:2}.load-more{padding:14px;text-align:center}.load-more button{color:var(--blue);font-weight:600}.session-count{font-size:12px;color:var(--muted);font-weight:400}
     @media (max-width: 768px) {
       .container { padding: 18px 14px 40px; }
@@ -667,7 +669,7 @@ function renderAll() {
   }
   document.getElementById('insights').innerHTML = renderInsights(insights);
 
-  document.getElementById('footer').textContent = '由 usagetoken 生成 \u00b7 ' + meta.recordCount + ' 条记录 \u00b7 ' + meta.sessionCount + ' 个会话 \u00b7 ' + dailyData.length + ' 天数据';
+  document.getElementById('footer').innerHTML = '由 usagetoken 生成 \u00b7 ' + meta.recordCount + ' 条记录 \u00b7 ' + meta.sessionCount + ' 个会话 \u00b7 ' + dailyData.length + ' 天数据 \u00b7 <a href="https://github.com/jiaming89/usage-token" target="_blank" rel="noopener noreferrer">GitHub</a> \u00b7 <a href="https://gitee.com/mujiaming/usage-token" target="_blank" rel="noopener noreferrer">Gitee</a>';
 }
 
 function switchView(view) {
