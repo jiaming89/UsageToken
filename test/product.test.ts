@@ -130,7 +130,7 @@ test("local dashboard server exposes cached dashboard data", async () => {
   try {
     const response = await fetch(`${dashboard.url}/api/dashboard/status`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { generatedAt: warehouse.generatedAt, refreshing: true });
+    assert.deepEqual(await response.json(), { generatedAt: warehouse.generatedAt, currentVersion: "0.1.9", updateAvailable: false, refreshing: true });
   } finally {
     await new Promise<void>((resolve) => dashboard.server.close(() => resolve()));
   }

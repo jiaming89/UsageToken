@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { renderDashboardHtml, renderTeamDashboardHtml } from "./dashboard.js";
 import type { LocalWarehouse, OrgDailySummary, TeamDailySummary, UploadBatch } from "../types.js";
+import { PACKAGE_VERSION } from "../version.js";
 
 interface ServerStore {
   schemaVersion: 1;
@@ -37,7 +38,7 @@ export async function startLocalDashboardServer(options: {
   host: string;
   defaultSince?: string;
   getWarehouse: () => LocalWarehouse;
-  getStatus: () => { refreshing: boolean; lastError?: string };
+  getStatus: () => { refreshing: boolean; lastError?: string; latestVersion?: string };
   refresh?: () => Promise<void>;
 }): Promise<{ server: Server; url: string }> {
   const server = createServer((req, res) => {
@@ -53,12 +54,12 @@ export async function startLocalDashboardServer(options: {
     }
     if (url.pathname === "/api/dashboard") {
       res.setHeader("content-type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ generatedAt: warehouse.generatedAt, status, daily: warehouse.dailyUserSummaries, sessions: warehouse.sessionSummaries }));
+      res.end(JSON.stringify({ generatedAt: warehouse.generatedAt, currentVersion: PACKAGE_VERSION, latestVersion: status.latestVersion, updateAvailable: Boolean(status.latestVersion), status, daily: warehouse.dailyUserSummaries, sessions: warehouse.sessionSummaries }));
       return;
     }
     if (url.pathname === "/api/dashboard/status") {
       res.setHeader("content-type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ generatedAt: warehouse.generatedAt, ...status }));
+      res.end(JSON.stringify({ generatedAt: warehouse.generatedAt, currentVersion: PACKAGE_VERSION, latestVersion: status.latestVersion, updateAvailable: Boolean(status.latestVersion), ...status }));
       return;
     }
     if (url.pathname === "/") {
@@ -78,12 +79,14 @@ export async function startLocalDashboardServer(options: {
   return { server, url: `http://${options.host}:${address.port}` };
 }
 
-function renderLocalDashboard(warehouse: LocalWarehouse, status: { refreshing: boolean; lastError?: string }, defaultSince?: string): string {
+function renderLocalDashboard(warehouse: LocalWarehouse, status: { refreshing: boolean; lastError?: string; latestVersion?: string }, defaultSince?: string): string {
   if (warehouse.dailyUserSummaries.length === 0) {
     return `<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>usagetoken</title><style>body{font-family:-apple-system,sans-serif;background:#f7f8fa;color:#1a1a2e;margin:0}.card{max-width:620px;margin:12vh auto;padding:32px;background:#fff;border:1px solid #e8eaed;border-radius:12px}p{color:#6b7280}</style></head><body><main class="card"><h1>Preparing usage dashboard…</h1><p>${status.lastError ? escapeHtml(status.lastError) : "Scanning local agent logs. This page will update when the first cache is ready."}</p></main><script>setTimeout(() => location.reload(), 3000)</script></body></html>`;
   }
+  const updateBanner = status.latestVersion ? `<div id="update-banner" style="margin:12px auto -4px;max-width:1240px;padding:12px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;color:#1e3a8a;font:14px -apple-system,sans-serif">发现新版本 usagetoken@${escapeHtml(status.latestVersion)}，运行 <code>npm install -g usagetoken@${escapeHtml(status.latestVersion)}</code> 升级。<button id="dismiss-update" type="button" style="float:right;border:0;background:transparent;color:#1d4ed8;cursor:pointer">关闭</button></div>` : "";
   const suffix = `<script>
     const dashboardVersion = ${JSON.stringify(warehouse.generatedAt)};
+    const updateVersion = ${JSON.stringify(status.latestVersion ?? "")};
     const dashboardDefaults = { since: ${JSON.stringify(defaultSince ?? lastThirtyDays())} };
     const savedRange = JSON.parse(localStorage.getItem('usagetoken-range') || 'null');
     const from = document.getElementById('date-from'), to = document.getElementById('date-to');
@@ -95,11 +98,14 @@ function renderLocalDashboard(warehouse: LocalWarehouse, status: { refreshing: b
     const badge = document.getElementById('user-badge');
     badge.title = ${JSON.stringify(status.lastError ?? '')};
     badge.textContent = ${JSON.stringify(status.refreshing ? 'Refreshing cache…' : 'Local dashboard')};
+    const updateBanner = document.getElementById('update-banner');
+    if (updateBanner && localStorage.getItem('usagetoken-dismissed-update') === updateVersion) updateBanner.remove();
+    document.getElementById('dismiss-update')?.addEventListener('click', () => { localStorage.setItem('usagetoken-dismissed-update', updateVersion); updateBanner?.remove(); });
     setInterval(async () => {
-      try { const next = await (await fetch('/api/dashboard/status')).json(); if (next.generatedAt !== dashboardVersion) location.reload(); } catch {};
+      try { const next = await (await fetch('/api/dashboard/status')).json(); if (next.generatedAt !== dashboardVersion || (next.latestVersion || '') !== updateVersion) location.reload(); } catch {};
     }, 15000);
   </script></body>`;
-  return renderDashboardHtml(warehouse).replace("</body>", suffix);
+  return renderDashboardHtml(warehouse).replace("<body>", `<body>${updateBanner}`).replace("</body>", suffix);
 }
 
 function escapeHtml(value: string): string {

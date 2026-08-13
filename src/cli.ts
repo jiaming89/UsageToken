@@ -17,6 +17,7 @@ import { createDailyUserSummaries, createSessionSummaries, createUploadBatch } f
 import { sources } from "./sources/index.js";
 import type { CliCommand, CliOptions, CostMode, LocalWarehouse, ProductCommand, ReportKind, UsageRecord } from "./types.js";
 import { writeUploadFile } from "./upload.js";
+import { PACKAGE_NAME, PACKAGE_VERSION, checkForUpdate } from "./version.js";
 
 export async function run(argv: string[], io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream } = process): Promise<number> {
   let options: CliOptions;
@@ -83,7 +84,7 @@ export function parseArgs(argv: string[]): CliOptions {
     printHelpAndExit();
   }
   if (args.includes("--version") || args.includes("-v") || args.includes("-V")) {
-    process.stdout.write("usagetoken 0.1.8\n");
+    process.stdout.write(`${PACKAGE_NAME} ${PACKAGE_VERSION}\n`);
     process.exit(0);
   }
   let command: CliCommand = "daily";
@@ -220,15 +221,21 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
     let warehouse = await readWarehouse(storeDir, config);
     let refreshing = false;
     let lastError: string | undefined;
+    let latestVersion: string | undefined;
     let refresh: () => Promise<void>;
     const dashboard = await startLocalDashboardServer({
       host: "127.0.0.1",
       defaultSince: options.since,
       getWarehouse: () => warehouse,
-      getStatus: () => ({ refreshing, lastError }),
+      getStatus: () => ({ refreshing, lastError, latestVersion }),
       refresh: () => refresh()
     });
     io.stdout.write(`Dashboard listening on ${dashboard.url}\n`);
+    void checkForUpdate().then((version) => {
+      if (!version) return;
+      latestVersion = version;
+      io.stdout.write(`有新版本 ${PACKAGE_NAME}@${version}，可运行：npm install -g ${PACKAGE_NAME}@${version}\n`);
+    });
     refresh = async () => {
       if (refreshing) return;
       refreshing = true;
