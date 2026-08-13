@@ -6,8 +6,8 @@ export class CodexSource implements UsageSource {
   readonly name = "codex";
 
   async detect(ctx: RuntimeContext): Promise<DetectionResult> {
-    const paths = await this.paths(ctx);
-    return { detected: paths.length > 0, paths };
+    const files = (await Promise.all((await this.paths(ctx)).map((root) => collectFiles(root, [".jsonl"])))).flat();
+    return { detected: files.length > 0, paths: [...new Set(files)] };
   }
 
   async load(ctx: LoadContext): Promise<UsageRecord[]> {

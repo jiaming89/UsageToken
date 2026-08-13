@@ -7,7 +7,20 @@ import { DatabaseSync } from "node:sqlite";
 import { ClaudeSource } from "../src/sources/claude.js";
 import { CodexSource } from "../src/sources/codex.js";
 import { CopilotSource } from "../src/sources/copilot.js";
+import { GenericJsonUsageSource } from "../src/sources/generic.js";
 import { GooseSource, HermesSource, KiloSource, OpenCodeSource } from "../src/sources/sqliteSources.js";
+
+test("generic source detects usage files instead of their parent directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "usagetoken-generic-"));
+  const file = join(root, "session", "usage.jsonl");
+  await mkdir(join(root, "session"), { recursive: true });
+  await writeFile(file, "{}\n", "utf8");
+
+  const detected = await new GenericJsonUsageSource({ name: "test", envVar: "TEST_DATA_DIR", defaultPaths: () => [] })
+    .detect({ env: { TEST_DATA_DIR: root }, cwd: root, homeDir: root });
+
+  assert.deepEqual(detected.paths, [file]);
+});
 
 test("claude source parses message usage JSONL", async () => {
   const root = await mkdtemp(join(tmpdir(), "usagetoken-claude-"));
@@ -34,6 +47,8 @@ test("claude source parses message usage JSONL", async () => {
   );
 
   const source = new ClaudeSource();
+  const detected = await source.detect({ env: { CLAUDE_CONFIG_DIR: root }, cwd: root, homeDir: root });
+  assert.deepEqual(detected.paths, [join(project, "chat.jsonl")]);
   const records = await source.load({
     env: { CLAUDE_CONFIG_DIR: root },
     cwd: root,
@@ -144,12 +159,26 @@ test("opencode source prefers database messages over duplicate legacy files", as
   );
   db.close();
 
-  const records = await new OpenCodeSource().load({ env: { OPENCODE_DATA_DIR: root }, cwd: root, homeDir: root, mode: "display", offline: true });
+  const source = new OpenCodeSource();
+  const detected = await source.detect({ env: { OPENCODE_DATA_DIR: root }, cwd: root, homeDir: root });
+  assert.deepEqual(detected.paths, [join(root, "opencode.db"), join(root, "storage", "message", "session-a", "msg-1.json")]);
+  const records = await source.load({ env: { OPENCODE_DATA_DIR: root }, cwd: root, homeDir: root, mode: "display", offline: true });
 
   assert.equal(records.length, 1);
   assert.equal(records[0]?.sessionId, "db-session");
   assert.equal(records[0]?.inputTokens, 120);
   assert.equal(records[0]?.costUSD, 0.03);
+});
+
+test("opencode source detects legacy message files instead of its parent directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "usagetoken-opencode-"));
+  const file = join(root, "storage", "message", "session-a", "msg-1.json");
+  await mkdir(join(root, "storage", "message", "session-a"), { recursive: true });
+  await writeFile(file, "{}", "utf8");
+
+  const detected = await new OpenCodeSource().detect({ env: { OPENCODE_DATA_DIR: root }, cwd: root, homeDir: root });
+
+  assert.deepEqual(detected.paths, [file]);
 });
 
 test("codex source parses token_count events with cached and reasoning tokens", async () => {
@@ -182,6 +211,8 @@ test("codex source parses token_count events with cached and reasoning tokens", 
   );
 
   const source = new CodexSource();
+  const detected = await source.detect({ env: { CODEX_HOME: root }, cwd: root, homeDir: root });
+  assert.deepEqual(detected.paths, [join(sessions, "session-alpha.jsonl")]);
   const records = await source.load({
     env: { CODEX_HOME: root },
     cwd: root,

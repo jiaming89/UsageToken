@@ -102,9 +102,8 @@ export class OpenCodeSource implements UsageSource {
       const dbPath = await opencodeDbPath(root);
       if (dbPath) {
         paths.push(dbPath);
-      } else if ((await collectFiles(join(root, "storage", "message"), [".json"])).length > 0) {
-        paths.push(root);
       }
+      paths.push(...await collectFiles(join(root, "storage", "message"), [".json"]));
     }
     return { detected: paths.length > 0, paths };
   }

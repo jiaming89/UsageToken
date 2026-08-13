@@ -8,8 +8,11 @@ export class ClaudeSource implements UsageSource {
   readonly name = "claude";
 
   async detect(ctx: RuntimeContext): Promise<DetectionResult> {
-    const paths = await this.paths(ctx);
-    return { detected: paths.length > 0, paths };
+    const files = (await Promise.all((await this.paths(ctx)).map(async (root) => {
+      const projectsRoot = root.endsWith("/projects") ? root : join(root, "projects");
+      return collectFiles(projectsRoot, [".jsonl"]);
+    }))).flat();
+    return { detected: files.length > 0, paths: [...new Set(files)] };
   }
 
   async load(ctx: LoadContext): Promise<UsageRecord[]> {
