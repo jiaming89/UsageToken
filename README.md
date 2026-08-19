@@ -77,7 +77,9 @@ utoken
 
 > 如果通过源码构建且未全局安装，请使用 `node dist/bin/utoken.js`。
 
-`utoken` 命令会启动本机仪表盘服务并自动打开浏览器。默认显示最近 30 天，后台会立即刷新本地缓存，随后每 15 分钟检查一次日志更新。按 `Ctrl+C` 停止服务。
+`utoken` 命令会启动本机仪表盘服务并自动打开浏览器。默认显示最近 30 天，后台会立即刷新本地缓存，随后每 30 分钟检查一次日志更新。按 `Ctrl+C` 停止服务。
+
+仪表盘可设置月度费用与 Token 预算，显示月底预测和异常用量提示；支持按当前筛选导出 CSV、JSON 或脱敏 HTML 报告。数据上报仅发送每日汇总，不发送原始日志或对话内容。
 
 仪表盘可按日期范围筛选，包括全部历史；首次全历史缓存建立期间，页面会显示正在刷新状态。
 
@@ -206,6 +208,12 @@ usagetoken serve --host 127.0.0.1 --port 8787 --server-mode team
 
 ```bash
 usagetoken upload-daily --endpoint http://127.0.0.1:8787/usage/daily-batch
+```
+
+团队服务可通过环境变量启用 API Key 校验：
+
+```bash
+USAGETOKEN_API_KEYS="key-a,key-b" usagetoken serve
 ```
 
 上传失败会本地排队，可稍后重试。

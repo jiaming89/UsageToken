@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
-import { run } from "../src/cli.js";
+import { loadCachedRecords, parseArgs, run } from "../src/cli.js";
+import { calculateBudgetStatus } from "../src/product/budget.js";
+import type { LocalWarehouse, UsageSource } from "../src/types.js";
 
 test("cli writes upload file envelope even with no data", async () => {
   const root = await mkdtemp(join(tmpdir(), "usagetoken-cli-"));
@@ -100,6 +102,67 @@ test("cli accepts source and by-source options with no data", async () => {
   }
 });
 
+test("cached refresh reports source health and isolates source failures", async () => {
+  const root = await mkdtemp(join(tmpdir(), "usagetoken-source-health-"));
+  const file = join(root, "usage.jsonl");
+  await writeFile(file, "{}\n", "utf8");
+  let normalLoads = 0;
+  let emptyLoads = 0;
+  const sources: UsageSource[] = [
+    {
+      name: "normal",
+      detect: async () => ({ detected: true, paths: [file] }),
+      load: async () => {
+        normalLoads += 1;
+        return [{ source: "normal", timestamp: "2026-08-19T01:00:00.000Z", inputTokens: 1, outputTokens: 2, cacheCreationTokens: 0, cacheReadTokens: 0 }];
+      }
+    },
+    { name: "no-logs", detect: async () => ({ detected: false, paths: [] }), load: async () => [] },
+    {
+      name: "no-usage",
+      detect: async () => ({ detected: true, paths: [file] }),
+      load: async () => {
+        emptyLoads += 1;
+        return [];
+      }
+    },
+    { name: "broken", detect: async () => ({ detected: true, paths: [file] }), load: async () => { throw new Error("fixture failed"); } }
+  ];
+  const warehouse = emptyWarehouse();
+  const first = await loadCachedRecords(parseArgs(["utoken"]), root, warehouse, { stdout: new MemoryWritable() }, sources);
+  assert.deepEqual(Object.fromEntries(first.sources.map((status) => [status.name, status.state])), {
+    normal: "normal", "no-logs": "no_logs", "no-usage": "no_usage", broken: "failed"
+  });
+  assert.equal(first.records.length, 1);
+  assert.equal(first.sources.find((status) => status.name === "broken")?.error, "fixture failed");
+
+  const second = await loadCachedRecords(parseArgs(["utoken"]), root, { ...warehouse, usageRecords: first.records }, { stdout: new MemoryWritable() }, sources);
+  assert.equal(second.sources.find((status) => status.name === "normal")?.cacheHit, true);
+  assert.equal(second.sources.find((status) => status.name === "no-usage")?.cacheHit, true);
+  assert.equal(normalLoads, 1);
+  assert.equal(emptyLoads, 1);
+
+  const selected = await loadCachedRecords(parseArgs(["utoken", "--source", "normal"]), root, { ...warehouse, usageRecords: first.records }, { stdout: new MemoryWritable() }, sources);
+  assert.equal(selected.sources.find((status) => status.name === "no-logs")?.state, "skipped");
+});
+
+test("budget warns for cost, token, and daily spike", () => {
+  const status = calculateBudgetStatus([
+    { date: "2026-07-01", totalCost: 20, totalTokens: 400, sourceBreakdown: [], modelBreakdown: [], projectBreakdown: [] },
+    { date: "2026-08-01", totalCost: 10, totalTokens: 100, sourceBreakdown: [], modelBreakdown: [], projectBreakdown: [] },
+    { date: "2026-08-02", totalCost: 10, totalTokens: 100, sourceBreakdown: [], modelBreakdown: [], projectBreakdown: [] },
+    { date: "2026-08-03", totalCost: 30, totalTokens: 900, sourceBreakdown: [], modelBreakdown: [], projectBreakdown: [] }
+  ] as never, { monthlyCostLimit: 40, monthlyTokenLimit: 1000, warningPercent: 80, dailyCostSpikeMultiplier: 2, dailyCostSpikeMinimum: 10 }, new Date("2026-08-03T12:00:00.000Z"));
+  assert.equal(status.alerts.some((alert) => alert.key === "cost-100"), true);
+  assert.equal(status.alerts.some((alert) => alert.key === "token-100"), true);
+  assert.equal(status.alerts.some((alert) => alert.key === "spike-2026-08-03"), true);
+  assert.equal(status.previousMonth, "2026-07");
+  assert.equal(status.previousTokens, 400);
+  assert.equal(status.previousCost, 20);
+  assert.equal(status.monthlyCostLimit, 40);
+  assert.equal(status.monthlyTokenLimit, 1000);
+});
+
 class MemoryWritable extends Writable {
   text = "";
   _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
@@ -136,4 +199,15 @@ function sourceEnvNames(): string[] {
     "QWEN_DATA_DIR",
     "ANTIGRAVITY_DATA_DIR"
   ];
+}
+
+function emptyWarehouse(): LocalWarehouse {
+  return {
+    schemaVersion: 1,
+    generatedAt: "2026-08-19T00:00:00.000Z",
+    config: { identity: { userId: "test", displayName: "Test", role: "individual" }, upload: { enabled: false, schedule: "daily" } },
+    usageRecords: [],
+    sessionSummaries: [],
+    dailyUserSummaries: []
+  };
 }

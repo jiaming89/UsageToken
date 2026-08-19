@@ -7,9 +7,9 @@ function response(version: unknown): Response {
 }
 
 test("update check returns only newer stable npm versions", async () => {
-  assert.equal(await checkForUpdate(async () => response("0.1.10")), "0.1.10");
-  assert.equal(await checkForUpdate(async () => response("0.1.9")), undefined);
-  assert.equal(await checkForUpdate(async () => response("0.2.0-beta.1")), undefined);
+  assert.equal(await checkForUpdate(async () => response("0.4.1")), "0.4.1");
+  assert.equal(await checkForUpdate(async () => response("0.4.0")), undefined);
+  assert.equal(await checkForUpdate(async () => response("0.5.0-beta.1")), undefined);
 });
 
 test("update check ignores registry failures", async () => {

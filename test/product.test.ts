@@ -42,7 +42,7 @@ test("sync writes warehouse and dashboard renders html", async () => {
   const previousCodexHome = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;
   try {
-    const code = await run(["sync", "--store-dir", storeDir, "--timezone", "Asia/Shanghai"]);
+    const code = await run(["sync", "--store-dir", storeDir, "--timezone", "Asia/Shanghai", "--source", "codex"]);
     assert.equal(code, 0);
     const warehouse = JSON.parse(await readFile(join(storeDir, "warehouse.json"), "utf8")) as { usageRecords: unknown[]; dailyUserSummaries: unknown[] };
     assert.equal(warehouse.usageRecords.length, 1);
@@ -52,10 +52,10 @@ test("sync writes warehouse and dashboard renders html", async () => {
     const dashboardCode = await run(["dashboard", "--store-dir", storeDir, "--html-file", dashboardPath]);
     assert.equal(dashboardCode, 0);
     const html = await readFile(dashboardPath, "utf8");
-    assert.match(html, /AI Usage Dashboard/);
-    assert.match(html, /Token composition/);
-    assert.match(html, /Daily breakdown/);
-    assert.match(html, /Cache hit rate/);
+    assert.match(html, /AI 用量仪表盘/);
+    assert.match(html, /Token 构成/);
+    assert.match(html, /每日明细/);
+    assert.match(html, /缓存命中率/);
     assert.equal((await stat(dashboardPath)).isFile(), true);
   } finally {
     if (previousCodexHome == null) delete process.env.CODEX_HOME;
@@ -99,12 +99,12 @@ test("cc syncs and renders dashboard in one command", async () => {
   process.env.CODEX_HOME = codexHome;
   process.env.USAGETOKEN_NO_OPEN = "1";
   try {
-    const code = await run(["cc", "--store-dir", storeDir]);
+    const code = await run(["cc", "--store-dir", storeDir, "--source", "codex"]);
     assert.equal(code, 0);
     const html = await readFile(join(storeDir, "dashboard.html"), "utf8");
-    assert.match(html, /AI Usage Dashboard/);
-    assert.match(html, /Token composition/);
-    assert.match(html, /Recent sessions/);
+    assert.match(html, /AI 用量仪表盘/);
+    assert.match(html, /Token 构成/);
+    assert.match(html, /会话列表/);
   } finally {
     if (previousCodexHome == null) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previousCodexHome;
@@ -114,6 +114,7 @@ test("cc syncs and renders dashboard in one command", async () => {
 });
 
 test("local dashboard server exposes cached dashboard data", async () => {
+  let reported: { userId: string; endpoint: string } | undefined;
   const warehouse: LocalWarehouse = {
     schemaVersion: 1,
     generatedAt: "2026-08-03T00:00:00.000Z",
@@ -125,12 +126,35 @@ test("local dashboard server exposes cached dashboard data", async () => {
   const dashboard = await startLocalDashboardServer({
     host: "127.0.0.1",
     getWarehouse: () => warehouse,
-    getStatus: () => ({ refreshing: true })
+    getStatus: () => ({
+      refreshing: true,
+      currentSource: "codex",
+      sources: [{ name: "codex", state: "normal", fileCount: 2, recordCount: 4, latestRecordAt: "2026-08-03T00:00:00.000Z", scannedAt: "2026-08-03T00:00:00.000Z", cacheHit: false }]
+    }),
+    report: async (input) => {
+      reported = input;
+      return { accepted: true, duplicate: false };
+    }
   });
   try {
     const response = await fetch(`${dashboard.url}/api/dashboard/status`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { generatedAt: warehouse.generatedAt, currentVersion: "0.1.9", updateAvailable: false, refreshing: true });
+    assert.deepEqual(await response.json(), {
+      generatedAt: warehouse.generatedAt,
+      currentVersion: "0.4.0",
+      updateAvailable: false,
+      scanSummary: { normal: 1, noLogs: 0, noUsage: 0, failed: 0 },
+      refreshing: true,
+      currentSource: "codex",
+      sources: [{ name: "codex", state: "normal", fileCount: 2, recordCount: 4, latestRecordAt: "2026-08-03T00:00:00.000Z", scannedAt: "2026-08-03T00:00:00.000Z", cacheHit: false }]
+    });
+    const html = await (await fetch(`${dashboard.url}/`)).text();
+    assert.match(html, /正在准备 AI 用量仪表盘/);
+    assert.match(html, /查看数据源详情/);
+    assert.match(html, /codex/);
+    const report = await fetch(`${dashboard.url}/api/dashboard/report`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: "user-a", endpoint: "https://example.com/usage/daily-batch" }) });
+    assert.deepEqual(await report.json(), { accepted: true, duplicate: false });
+    assert.deepEqual(reported, { userId: "user-a", endpoint: "https://example.com/usage/daily-batch" });
   } finally {
     await new Promise<void>((resolve) => dashboard.server.close(() => resolve()));
   }
@@ -171,7 +195,7 @@ test("daily batch upload ingests into local server rollups", async () => {
   const server = await startUsageServer({
     storeDir: serverDir,
     host: "127.0.0.1",
-    port: 8899,
+    port: 0,
     mode: "team",
     io: process
   });
@@ -179,7 +203,7 @@ test("daily batch upload ingests into local server rollups", async () => {
   const previousCodexHome = process.env.CODEX_HOME;
   try {
     process.env.CODEX_HOME = codexHome;
-    await run(["sync", "--store-dir", storeDir]);
+    await run(["sync", "--store-dir", storeDir, "--source", "codex"]);
     const configPath = join(storeDir, "config.json");
     const config = JSON.parse(await readFile(configPath, "utf8")) as { identity: Record<string, string>; upload: Record<string, unknown> };
     config.identity.userId = "user-a";
@@ -188,9 +212,11 @@ test("daily batch upload ingests into local server rollups", async () => {
     config.identity.teamName = "Team A";
     config.identity.orgId = "org-a";
     config.identity.orgName = "Org A";
-    config.upload.endpoint = "http://127.0.0.1:8899/usage/daily-batch";
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    config.upload.endpoint = `http://127.0.0.1:${address.port}/usage/daily-batch`;
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    await run(["sync", "--store-dir", storeDir]);
+    await run(["sync", "--store-dir", storeDir, "--source", "codex"]);
 
     const code = await run(["upload-daily", "--store-dir", storeDir]);
     assert.equal(code, 0);

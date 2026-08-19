@@ -29,6 +29,20 @@ export interface UsageSource {
   load(ctx: LoadContext): Promise<UsageRecord[]>;
 }
 
+export type SourceScanState = "normal" | "no_logs" | "no_usage" | "failed" | "skipped";
+
+export interface SourceScanStatus {
+  name: string;
+  state: SourceScanState;
+  fileCount: number;
+  recordCount: number;
+  latestRecordAt?: string;
+  scannedAt: string;
+  cacheHit: boolean;
+  paths?: string[];
+  error?: string;
+}
+
 export interface UsageRecord {
   source: string;
   timestamp: string;
@@ -124,9 +138,38 @@ export interface UploadSettings {
   schedule: "daily";
 }
 
+export interface BudgetSettings {
+  monthlyCostLimit?: number;
+  monthlyTokenLimit?: number;
+  warningPercent: number;
+  dailyCostSpikeMultiplier: number;
+  dailyCostSpikeMinimum: number;
+}
+
 export interface ProductConfig {
   identity: UserIdentity;
   upload: UploadSettings;
+  budget?: BudgetSettings;
+}
+
+export interface BudgetAlert {
+  key: string;
+  level: "warning" | "error";
+  message: string;
+}
+
+export interface BudgetStatus {
+  month: string;
+  cost: number;
+  tokens: number;
+  previousMonth: string;
+  previousCost: number;
+  previousTokens: number;
+  monthlyCostLimit?: number;
+  monthlyTokenLimit?: number;
+  projectedCost: number;
+  projectedTokens: number;
+  alerts: BudgetAlert[];
 }
 
 export interface SessionSummaryRecord {

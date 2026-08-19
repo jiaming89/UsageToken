@@ -2,6 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ProductConfig } from "../types.js";
 
+export const DEFAULT_BUDGET = {
+  warningPercent: 80,
+  dailyCostSpikeMultiplier: 2,
+  dailyCostSpikeMinimum: 10
+};
+
 const DEFAULT_CONFIG: ProductConfig = {
   identity: {
     userId: "local-user",
@@ -26,7 +32,8 @@ export async function readProductConfig(storeDir: string): Promise<ProductConfig
       upload: {
         ...DEFAULT_CONFIG.upload,
         ...parsed.upload
-      }
+      },
+      budget: parsed.budget ? { ...DEFAULT_BUDGET, ...parsed.budget } : undefined
     };
   } catch {
     await writeProductConfig(storeDir, DEFAULT_CONFIG);

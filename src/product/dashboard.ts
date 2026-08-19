@@ -170,7 +170,7 @@ export function renderDashboardHtml(warehouse: LocalWarehouse): string {
         <h1>AI 用量仪表盘</h1>
         <div class="header-sub" id="header-sub"></div>
       </div>
-      <span class="badge" id="user-badge"></span>
+      <button class="badge" id="user-badge" type="button"></button>
     </header>
 
     <div class="tab-bar" id="tab-bar">
@@ -627,6 +627,17 @@ function getViewTotals(viewData) {
 }
 
 function renderAll() {
+  var sourceHealth = document.getElementById('source-health-view');
+  var monthlyComparison = document.getElementById('monthly-comparison-view');
+  var dashboardContent = document.getElementById('dashboard-content');
+  if (sourceHealth && monthlyComparison && dashboardContent) {
+    var isSourceView = currentView === 'source';
+    var isComparisonView = currentView === 'comparison';
+    sourceHealth.style.display = isSourceView ? '' : 'none';
+    monthlyComparison.style.display = isComparisonView ? '' : 'none';
+    dashboardContent.style.display = isSourceView || isComparisonView ? 'none' : '';
+    if (isSourceView || isComparisonView) return;
+  }
   var viewData = getViewData();
   var filteredDaily = getFilteredDaily();
   var totals = getViewTotals(viewData);

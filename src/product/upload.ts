@@ -2,7 +2,7 @@ import { request } from "node:http";
 import { request as requestTls } from "node:https";
 import type { UploadBatch } from "../types.js";
 
-export async function postDailyBatch(endpoint: string, batch: UploadBatch): Promise<{ accepted: boolean; duplicate: boolean }> {
+export async function postDailyBatch(endpoint: string, batch: UploadBatch, apiKey?: string): Promise<{ accepted: boolean; duplicate: boolean }> {
   const url = new URL(endpoint);
   const body = JSON.stringify(batch);
   const transport = url.protocol === "https:" ? requestTls : request;
@@ -16,7 +16,8 @@ export async function postDailyBatch(endpoint: string, batch: UploadBatch): Prom
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "content-length": Buffer.byteLength(body)
+          "content-length": Buffer.byteLength(body),
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
         }
       },
       (res) => {

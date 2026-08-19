@@ -7,15 +7,16 @@ import { normalizeDateBound, withinDateRange } from "./core/date.js";
 import { summarizeAllAgent, summarizeBySource } from "./core/summary.js";
 import { renderBlocksTable, renderTable } from "./output/table.js";
 import { renderReportHtml, writeReportHtml } from "./output/html-report.js";
-import { readProductConfig } from "./product/config.js";
+import { readProductConfig, writeProductConfig } from "./product/config.js";
+import { calculateBudgetStatus } from "./product/budget.js";
 import { writeDashboardFile } from "./product/dashboard.js";
 import { openInBrowser } from "./product/open.js";
 import { startLocalDashboardServer, startUsageServer } from "./product/server.js";
-import { readPendingUploads, readWarehouse, writePendingUploads, writeWarehouse, readSourceCache, writeSourceCache } from "./product/store.js";
+import { readAlertState, readPendingUploads, readWarehouse, writeAlertState, writePendingUploads, writeWarehouse, readSourceCache, writeSourceCache } from "./product/store.js";
 import { postDailyBatch } from "./product/upload.js";
 import { createDailyUserSummaries, createSessionSummaries, createUploadBatch } from "./product/warehouse.js";
 import { sources } from "./sources/index.js";
-import type { CliCommand, CliOptions, CostMode, LocalWarehouse, ProductCommand, ReportKind, UsageRecord } from "./types.js";
+import type { BudgetSettings, CliCommand, CliOptions, CostMode, LocalWarehouse, ProductCommand, ReportKind, SourceScanStatus, UsageRecord, UsageSource } from "./types.js";
 import { writeUploadFile } from "./upload.js";
 import { PACKAGE_NAME, PACKAGE_VERSION, checkForUpdate } from "./version.js";
 
@@ -192,7 +193,7 @@ function filterRecordsBySource(records: UsageRecord[], source: string | undefine
 
 async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream }): Promise<number> {
   const storeDir = resolveStoreDir(options.storeDir);
-  const config = await readProductConfig(storeDir);
+  let config = await readProductConfig(storeDir);
   if (options.command === "sync") {
     const records = filterRecordsBySource(await loadAllRecords(options), options.source);
     const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
@@ -229,13 +230,24 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
     let refreshing = false;
     let lastError: string | undefined;
     let latestVersion: string | undefined;
+    let lastSuccessAt: string | undefined;
+    let currentSource: string | undefined;
+    let sourceStatuses: SourceScanStatus[] = [];
     let refresh: () => Promise<void>;
     const dashboard = await startLocalDashboardServer({
       host: "127.0.0.1",
       defaultSince: options.since,
       getWarehouse: () => warehouse,
-      getStatus: () => ({ refreshing, lastError, latestVersion }),
-      refresh: () => refresh()
+      getStatus: () => ({ refreshing, lastError, latestVersion, currentSource, lastSuccessAt, sources: sourceStatuses, budget: calculateBudgetStatus(warehouse.dailyUserSummaries, config.budget) }),
+      refresh: () => refresh(),
+      getBudget: () => config.budget,
+      saveBudget: async (budget) => { config = { ...config, budget }; await writeProductConfig(storeDir, config); },
+      report: async ({ userId, endpoint, apiKey }) => {
+        const url = new URL(endpoint);
+        if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("上报地址必须使用 HTTP 或 HTTPS。");
+        if (warehouse.dailyUserSummaries.length === 0) throw new Error("暂无可上报的每日汇总数据。");
+        return await postDailyBatch(url.toString(), createUploadBatch({ ...config, identity: { ...config.identity, userId } }, warehouse.dailyUserSummaries), apiKey);
+      }
     });
     io.stdout.write(`Dashboard listening on ${dashboard.url}\n`);
     void checkForUpdate().then((version) => {
@@ -247,24 +259,37 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
       if (refreshing) return;
       refreshing = true;
       lastError = undefined;
+      currentSource = undefined;
       try {
         io.stdout.write("Refreshing usage cache…\n");
-        const records = await loadCachedRecords(options, storeDir, cachedWarehouse, io);
+        const result = await loadCachedRecords(options, storeDir, cachedWarehouse, io, sources, (name, statuses) => {
+          currentSource = name;
+          sourceStatuses = statuses;
+        });
+        const records = result.records;
+        sourceStatuses = result.sources;
         const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
         const dailyUserSummaries = createDailyUserSummaries(records, config, options.timezone, options.mode);
         warehouse = await writeWarehouse(storeDir, config, { usageRecords: records, sessionSummaries, dailyUserSummaries });
         cachedWarehouse = warehouse;
-        io.stdout.write(`Cache refreshed: ${records.length} records. Next refresh in 15 minutes.\n`);
+        lastSuccessAt = warehouse.generatedAt;
+        const budget = calculateBudgetStatus(dailyUserSummaries, config.budget);
+        const alertState = await readAlertState(storeDir);
+        const newAlerts = budget.alerts.filter((alert) => alertState.sent[alert.key] !== budget.month);
+        for (const alert of newAlerts) alertState.sent[alert.key] = budget.month;
+        if (newAlerts.length) await writeAlertState(storeDir, alertState);
+        io.stdout.write(`${renderScanSummary(sourceStatuses, records.length)} 下次刷新：30 分钟后。${newAlerts.map((alert) => ` 预警：${alert.message}`).join("")}\n`);
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         io.stderr.write(`Cache refresh failed: ${lastError}\n`);
       } finally {
         refreshing = false;
+        currentSource = undefined;
       }
     };
     await openInBrowser(dashboard.url);
     void refresh();
-    const timer = setInterval(() => void refresh(), 15 * 60 * 1000);
+    const timer = setInterval(() => void refresh(), 30 * 60 * 1000);
     return await new Promise<number>((resolve) => {
       const stop = () => {
         clearInterval(timer);
@@ -287,7 +312,7 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
     }
     const batch = createUploadBatch(config, warehouse.dailyUserSummaries);
     try {
-      const result = await postDailyBatch(endpoint, batch);
+      const result = await postDailyBatch(endpoint, batch, config.upload.apiKey);
       if (!result.duplicate) {
         await writePendingUploads(storeDir, []);
       }
@@ -347,7 +372,14 @@ async function loadAllRecords(options: CliOptions): Promise<UsageRecord[]> {
   return all;
 }
 
-async function loadCachedRecords(options: CliOptions, storeDir: string, warehouse: LocalWarehouse, io: { stdout: NodeJS.WritableStream }): Promise<UsageRecord[]> {
+export async function loadCachedRecords(
+  options: CliOptions,
+  storeDir: string,
+  warehouse: LocalWarehouse,
+  io: { stdout: NodeJS.WritableStream },
+  availableSources: UsageSource[] = sources,
+  onProgress?: (source: string, statuses: SourceScanStatus[]) => void
+): Promise<{ records: UsageRecord[]; sources: SourceScanStatus[] }> {
   const cache = await readSourceCache(storeDir);
   const ctx = { env: process.env, cwd: process.cwd(), homeDir: homedir(), mode: options.mode, offline: options.offline };
   const cachedBySource = new Map<string, UsageRecord[]>();
@@ -358,17 +390,58 @@ async function loadCachedRecords(options: CliOptions, storeDir: string, warehous
   }
   const all: UsageRecord[] = [];
   const fingerprints: Record<string, string> = {};
-  for (const source of sources) {
-    if (options.source && source.name !== options.source) continue;
-    const detected = await source.detect(ctx);
-    const fingerprint = await fingerprintPaths(detected.paths);
-    fingerprints[source.name] = fingerprint;
-    if (cache.fingerprints[source.name] === fingerprint && cachedBySource.has(source.name)) {
-      io.stdout.write(`Using cached ${source.name} records.\n`);
-      all.push(...(cachedBySource.get(source.name) ?? []));
-    } else {
-      io.stdout.write(`Scanning ${source.name}…\n`);
-      all.push(...await source.load(ctx));
+  const statuses: SourceScanStatus[] = [];
+  const persistedStatuses = { ...cache.statuses };
+  for (const source of availableSources) {
+    if (options.source && source.name !== options.source) {
+      statuses.push({ name: source.name, state: "skipped", fileCount: 0, recordCount: 0, scannedAt: new Date().toISOString(), cacheHit: false });
+      continue;
+    }
+    onProgress?.(source.name, statuses);
+    const scannedAt = new Date().toISOString();
+    try {
+      const detected = await source.detect(ctx);
+      if (detected.paths.length === 0) {
+        fingerprints[source.name] = "";
+        const status: SourceScanStatus = { name: source.name, state: "no_logs", fileCount: 0, recordCount: 0, scannedAt, cacheHit: false, paths: detected.paths };
+        statuses.push(status);
+        persistedStatuses[source.name] = status;
+        continue;
+      }
+      const fingerprint = await fingerprintPaths(detected.paths);
+      const previous = cache.statuses[source.name];
+      const cachedRecords = cachedBySource.get(source.name) ?? [];
+      const cacheHit = cache.fingerprints[source.name] === fingerprint && (cachedBySource.has(source.name) || previous?.state === "no_usage");
+      const records = cacheHit ? cachedRecords : await source.load(ctx);
+      if (cacheHit) io.stdout.write(`Using cached ${source.name} records.\n`);
+      else io.stdout.write(`Scanning ${source.name}…\n`);
+      all.push(...records);
+      fingerprints[source.name] = fingerprint;
+      const status: SourceScanStatus = {
+        name: source.name,
+        state: records.length > 0 ? "normal" : "no_usage",
+        fileCount: detected.paths.length,
+        recordCount: records.length,
+        latestRecordAt: latestRecordAt(records),
+        scannedAt,
+        cacheHit,
+        paths: detected.paths
+      };
+      statuses.push(status);
+      persistedStatuses[source.name] = status;
+    } catch (error) {
+      const status: SourceScanStatus = {
+        name: source.name,
+        state: "failed",
+        fileCount: 0,
+        recordCount: 0,
+        scannedAt,
+        cacheHit: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+      statuses.push(status);
+      persistedStatuses[source.name] = status;
+      io.stdout.write(`Failed to scan ${source.name}: ${status.error}\n`);
     }
   }
   if (options.source) {
@@ -376,8 +449,19 @@ async function loadCachedRecords(options: CliOptions, storeDir: string, warehous
       if (name !== options.source) all.push(...records);
     }
   }
-  await writeSourceCache(storeDir, { fingerprints: { ...cache.fingerprints, ...fingerprints } });
-  return all;
+  await writeSourceCache(storeDir, { fingerprints: { ...cache.fingerprints, ...fingerprints }, statuses: persistedStatuses });
+  return { records: all, sources: statuses };
+}
+
+function latestRecordAt(records: UsageRecord[]): string | undefined {
+  return records.reduce<string | undefined>((latest, record) => !latest || record.timestamp > latest ? record.timestamp : latest, undefined);
+}
+
+function renderScanSummary(statuses: SourceScanStatus[], recordCount: number): string {
+  const normal = statuses.filter((status) => status.state === "normal").length;
+  const noLogs = statuses.filter((status) => status.state === "no_logs").length;
+  const failed = statuses.filter((status) => status.state === "failed").length;
+  return `Cache refreshed: ${recordCount} records. Sources normal ${normal}, no logs ${noLogs}, failed ${failed}.`;
 }
 
 async function fingerprintPaths(paths: string[]): Promise<string> {

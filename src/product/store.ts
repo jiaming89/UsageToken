@@ -1,9 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { DailyUserSummary, LocalWarehouse, ProductConfig, SessionSummaryRecord, UploadBatch, UsageRecord } from "../types.js";
+import type { DailyUserSummary, LocalWarehouse, ProductConfig, SessionSummaryRecord, SourceScanStatus, UploadBatch, UsageRecord } from "../types.js";
+
+export interface AlertState { sent: Record<string, string>; }
 
 export interface SourceCache {
   fingerprints: Record<string, string>;
+  statuses: Record<string, SourceScanStatus>;
 }
 
 export async function readWarehouse(storeDir: string, config: ProductConfig): Promise<LocalWarehouse> {
@@ -60,9 +63,9 @@ export async function writePendingUploads(storeDir: string, batches: UploadBatch
 export async function readSourceCache(storeDir: string): Promise<SourceCache> {
   try {
     const parsed = JSON.parse(await readFile(sourceCachePath(storeDir), "utf8")) as SourceCache;
-    return { fingerprints: parsed.fingerprints ?? {} };
+    return { fingerprints: parsed.fingerprints ?? {}, statuses: parsed.statuses ?? {} };
   } catch {
-    return { fingerprints: {} };
+    return { fingerprints: {}, statuses: {} };
   }
 }
 
@@ -80,6 +83,16 @@ export async function enqueuePendingUpload(storeDir: string, batch: UploadBatch)
   }
 }
 
+export async function readAlertState(storeDir: string): Promise<AlertState> {
+  try { return { sent: (JSON.parse(await readFile(alertStatePath(storeDir), "utf8")) as AlertState).sent ?? {} }; } catch { return { sent: {} }; }
+}
+
+export async function writeAlertState(storeDir: string, state: AlertState): Promise<void> {
+  const path = alertStatePath(storeDir);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
 export function warehousePath(storeDir: string): string {
   return join(storeDir, "warehouse.json");
 }
@@ -91,6 +104,8 @@ function pendingUploadsPath(storeDir: string): string {
 function sourceCachePath(storeDir: string): string {
   return join(storeDir, "source-cache.json");
 }
+
+function alertStatePath(storeDir: string): string { return join(storeDir, "alert-state.json"); }
 
 function emptyWarehouse(config: ProductConfig): LocalWarehouse {
   return {
