@@ -1,5 +1,5 @@
 export const PACKAGE_NAME = "usagetoken";
-export const PACKAGE_VERSION = "0.1.9";
+export const PACKAGE_VERSION = "0.1.10";
 
 const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 

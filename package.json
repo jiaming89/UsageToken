@@ -1,6 +1,6 @@
 {
   "name": "usagetoken",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A Node/TypeScript CLI for collecting and reporting local coding-agent token usage",
   "license": "MIT",
   "author": "mujiaming",
