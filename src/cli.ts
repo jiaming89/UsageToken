@@ -218,7 +218,14 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
     return 0;
   }
   if (options.command === "utoken") {
-    let warehouse = await readWarehouse(storeDir, config);
+    let cachedWarehouse = await readWarehouse(storeDir, config);
+    let warehouse: LocalWarehouse = {
+      ...cachedWarehouse,
+      generatedAt: new Date(0).toISOString(),
+      usageRecords: [],
+      sessionSummaries: [],
+      dailyUserSummaries: []
+    };
     let refreshing = false;
     let lastError: string | undefined;
     let latestVersion: string | undefined;
@@ -242,10 +249,11 @@ async function runProductCommand(options: CliOptions, io: { stdout: NodeJS.Writa
       lastError = undefined;
       try {
         io.stdout.write("Refreshing usage cache…\n");
-        const records = await loadCachedRecords(options, storeDir, warehouse, io);
+        const records = await loadCachedRecords(options, storeDir, cachedWarehouse, io);
         const sessionSummaries = createSessionSummaries(records, options.timezone, options.mode);
         const dailyUserSummaries = createDailyUserSummaries(records, config, options.timezone, options.mode);
         warehouse = await writeWarehouse(storeDir, config, { usageRecords: records, sessionSummaries, dailyUserSummaries });
+        cachedWarehouse = warehouse;
         io.stdout.write(`Cache refreshed: ${records.length} records. Next refresh in 15 minutes.\n`);
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
